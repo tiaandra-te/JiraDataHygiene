@@ -14,15 +14,17 @@ Console app that loads Jira issues from multiple filter IDs, aggregates them per
 3. Get your [Jira token](https://id.atlassian.com/manage-profile/security/api-tokens)
 4. Set `SendGrid.DryRun` to `true` while testing.
 
+## Build
+```bash
+dotnet build JiraDAtaHygiene.sln
+```
+
 ## Run
 ```bash
 dotnet run --project JiraDAtaHygiene.sln
 ```
 
-## Build
-```bash
-dotnet build JiraDAtaHygiene.sln
-```
+
 
 ## Email Example
 Hello Jane Doe,
