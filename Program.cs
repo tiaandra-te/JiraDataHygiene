@@ -303,12 +303,13 @@ internal static class Program
             .Replace("{IssueCount}", issueCount.ToString(), StringComparison.OrdinalIgnoreCase);
 
         var filtersBlock = BuildFiltersBlock(bucket, baseUrl, useHtml);
-        if (resolved.Contains("{Filters}", StringComparison.OrdinalIgnoreCase))
+        var hasFiltersToken = resolved.Contains("{Filters}", StringComparison.OrdinalIgnoreCase);
+        if (hasFiltersToken)
         {
             resolved = resolved.Replace("{Filters}", filtersBlock, StringComparison.OrdinalIgnoreCase);
         }
 
-        if (appendFiltersWhenMissing)
+        if (appendFiltersWhenMissing && !hasFiltersToken)
         {
             resolved = useHtml ? $"{resolved}<br/><br/>{filtersBlock}" : $"{resolved}\n\n{filtersBlock}";
         }
