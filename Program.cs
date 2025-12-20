@@ -43,7 +43,7 @@ internal static class Program
             return 1;
         }
 
-        if (settings.Jira.FilterIds.Count == 0)
+        if (settings.Jira.Filters.Count == 0)
         {
             Console.Error.WriteLine("No Jira filter IDs configured.");
             return 1;
@@ -54,12 +54,13 @@ internal static class Program
 
         var filters = new List<FilterIssues>();
 
-        foreach (var filterId in settings.Jira.FilterIds)
+        foreach (var filterConfig in settings.Jira.Filters)
         {
+            var filterId = filterConfig.Id;
             Console.WriteLine($"Loading issues for filter {filterId}...");
             var filterName = await LoadFilterNameAsync(jiraClient, filterId);
             var issues = await LoadIssuesForFilterAsync(jiraClient, filterId);
-            filters.Add(new FilterIssues(filterId, filterName, issues));
+            filters.Add(new FilterIssues(filterId, filterName, filterConfig.Description, issues));
         }
 
         var assignees = new Dictionary<string, AssigneeBucket>(StringComparer.OrdinalIgnoreCase);
@@ -89,7 +90,7 @@ internal static class Program
 
                 if (!bucket.Filters.TryGetValue(filter.FilterId, out var filterBucket))
                 {
-                    filterBucket = new FilterBucket(filter.FilterId, filter.FilterName);
+                    filterBucket = new FilterBucket(filter.FilterId, filter.FilterName, filter.Description);
                     bucket.Filters[filter.FilterId] = filterBucket;
                 }
 
@@ -350,11 +351,19 @@ internal static class Program
             if (useHtml)
             {
                 builder.AppendLine($"<a href=\"{filterUrl}\">{WebUtility.HtmlEncode(filter.FilterName)} ({filter.Issues.Count})</a><br/>");
+                if (!string.IsNullOrWhiteSpace(filter.Description))
+                {
+                    builder.AppendLine($"<div><em>{WebUtility.HtmlEncode(filter.Description)}</em></div><br/>");
+                }
                 builder.AppendLine("<ul>");
             }
             else
             {
                 builder.AppendLine($"Filter: {filter.FilterName} ({filter.FilterId}) {filterUrl}");
+                if (!string.IsNullOrWhiteSpace(filter.Description))
+                {
+                    builder.AppendLine($"Description: {filter.Description}");
+                }
             }
 
             foreach (var issue in filter.Issues)
@@ -436,7 +445,7 @@ sealed class JiraSettings
     public string BaseUrl { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
     public string ApiToken { get; set; } = string.Empty;
-    public List<int> FilterIds { get; set; } = [];
+    public List<JiraFilterConfig> Filters { get; set; } = [];
 }
 
 sealed class SendGridSettings
@@ -528,27 +537,37 @@ sealed class AssigneeBucket
 
 sealed class FilterIssues
 {
-    public FilterIssues(int filterId, string filterName, List<JiraIssue> issues)
+    public FilterIssues(int filterId, string filterName, string description, List<JiraIssue> issues)
     {
         FilterId = filterId;
         FilterName = filterName;
+        Description = description;
         Issues = issues;
     }
 
     public int FilterId { get; }
     public string FilterName { get; }
+    public string Description { get; }
     public List<JiraIssue> Issues { get; }
 }
 
 sealed class FilterBucket
 {
-    public FilterBucket(int filterId, string filterName)
+    public FilterBucket(int filterId, string filterName, string description)
     {
         FilterId = filterId;
         FilterName = filterName;
+        Description = description;
     }
 
     public int FilterId { get; }
     public string FilterName { get; }
+    public string Description { get; }
     public List<IssueEntry> Issues { get; } = [];
+}
+
+sealed class JiraFilterConfig
+{
+    public int Id { get; set; }
+    public string Description { get; set; } = string.Empty;
 }

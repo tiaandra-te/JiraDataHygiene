@@ -24,7 +24,7 @@ dotnet run --project JiraDAtaHygiene.sln
 - `Jira.BaseUrl`: Jira Cloud base URL, e.g. `https://your-domain.atlassian.net/`.
 - `Jira.Email`: Jira user email for API auth.
 - `Jira.ApiToken`: Jira API token.
-- `Jira.FilterIds`: List of filter IDs to load.
+- `Jira.Filters`: List of filter entries with `Id` and `Description`.
 - `SendGrid.ApiKey`: SendGrid API key.
 - `SendGrid.FromEmail`: From address for outbound email.
 - `SendGrid.FromName`: From display name.
