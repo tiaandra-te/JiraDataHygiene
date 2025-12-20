@@ -2,6 +2,8 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Linq;
+using System.Net;
 
 internal static class Program
 {
@@ -16,7 +18,8 @@ internal static class Program
 
     private static async Task<int> Main()
     {
-        if (!File.Exists(SettingsFileName))
+        var settingsPath = ResolveSettingsPath();
+        if (settingsPath is null)
         {
             Console.Error.WriteLine($"Missing {SettingsFileName}. Create it based on appsettings.example.json.");
             return 1;
@@ -25,7 +28,7 @@ internal static class Program
         AppSettings? settings;
         try
         {
-            var settingsJson = await File.ReadAllTextAsync(SettingsFileName);
+            var settingsJson = await File.ReadAllTextAsync(settingsPath);
             settings = JsonSerializer.Deserialize<AppSettings>(settingsJson, JsonOptions);
         }
         catch (Exception ex)
@@ -47,16 +50,23 @@ internal static class Program
         }
 
         using var jiraClient = CreateJiraClient(settings.Jira);
-        using var sendGridClient = settings.SendGrid.DryRun
-            ? null
-            : CreateSendGridClient(settings.SendGrid);
+        using var sendGridClient = CreateSendGridClient(settings.SendGrid);
+
+        var filters = new List<FilterIssues>();
 
         foreach (var filterId in settings.Jira.FilterIds)
         {
             Console.WriteLine($"Loading issues for filter {filterId}...");
+            var filterName = await LoadFilterNameAsync(jiraClient, filterId);
             var issues = await LoadIssuesForFilterAsync(jiraClient, filterId);
+            filters.Add(new FilterIssues(filterId, filterName, issues));
+        }
 
-            foreach (var issue in issues)
+        var assignees = new Dictionary<string, AssigneeBucket>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var filter in filters)
+        {
+            foreach (var issue in filter.Issues)
             {
                 var assignee = issue.Fields.Assignee;
                 if (assignee is null)
@@ -71,27 +81,59 @@ internal static class Program
                     continue;
                 }
 
-                var subject = ApplyTemplate(settings.SendGrid.SubjectTemplate, issue, filterId, settings.Jira.BaseUrl);
-                var body = ApplyTemplate(settings.SendGrid.BodyTemplate, issue, filterId, settings.Jira.BaseUrl);
-
-                if (settings.SendGrid.DryRun)
+                if (!assignees.TryGetValue(assignee.EmailAddress, out var bucket))
                 {
-                    Console.WriteLine($"[DryRun] Would send {issue.Key} to {assignee.EmailAddress} with subject '{subject}'.");
-                    continue;
+                    bucket = new AssigneeBucket(assignee.EmailAddress, assignee.DisplayName);
+                    assignees[assignee.EmailAddress] = bucket;
                 }
 
-                var sent = await SendEmailAsync(
-                    sendGridClient!,
-                    settings.SendGrid,
-                    assignee.EmailAddress,
-                    assignee.DisplayName ?? assignee.EmailAddress,
-                    subject,
-                    body);
+                if (!bucket.Filters.TryGetValue(filter.FilterId, out var filterBucket))
+                {
+                    filterBucket = new FilterBucket(filter.FilterId, filter.FilterName);
+                    bucket.Filters[filter.FilterId] = filterBucket;
+                }
 
-                Console.WriteLine(sent
-                    ? $"Sent email for {issue.Key} to {assignee.EmailAddress}."
-                    : $"Failed to send email for {issue.Key} to {assignee.EmailAddress}.");
+                filterBucket.Issues.Add(new IssueEntry(
+                    issue.Key,
+                    issue.Fields.Summary,
+                    filter.FilterId,
+                    $"{EnsureTrailingSlash(settings.Jira.BaseUrl)}browse/{issue.Key}"));
             }
+        }
+
+        foreach (var bucket in assignees.Values)
+        {
+            var issueCount = bucket.Filters.Values.Sum(filter => filter.Issues.Count);
+            var useHtml = string.Equals(settings.SendGrid.ContentType, "text/html", StringComparison.OrdinalIgnoreCase);
+            var subject = ApplyUserTemplate(
+                settings.SendGrid.SubjectTemplate,
+                bucket,
+                issueCount,
+                settings.Jira.BaseUrl,
+                useHtml,
+                appendFiltersWhenMissing: false);
+            var body = ApplyUserTemplate(
+                settings.SendGrid.BodyTemplate,
+                bucket,
+                issueCount,
+                settings.Jira.BaseUrl,
+                useHtml,
+                appendFiltersWhenMissing: true);
+
+            var toEmail = settings.SendGrid.DryRun ? "tiaandra@cisco.com" : bucket.Email;
+            var toName = settings.SendGrid.DryRun ? "Tiaandra Cisco" : (bucket.DisplayName ?? bucket.Email);
+
+            var sent = await SendEmailAsync(
+                sendGridClient,
+                settings.SendGrid,
+                toEmail,
+                toName,
+                subject,
+                body);
+
+            Console.WriteLine(sent
+                ? $"{(settings.SendGrid.DryRun ? "[DryRun] " : string.Empty)}Sent email to {toEmail} for {issueCount} issues."
+                : $"{(settings.SendGrid.DryRun ? "[DryRun] " : string.Empty)}Failed to send email to {toEmail} for {issueCount} issues.");
         }
 
         return 0;
@@ -162,6 +204,22 @@ internal static class Program
         return issues;
     }
 
+    private static async Task<string> LoadFilterNameAsync(HttpClient client, int filterId)
+    {
+        var url = $"rest/api/3/filter/{filterId}";
+        using var response = await client.GetAsync(url);
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync();
+            Console.WriteLine($"Failed to load filter name {filterId}: {response.StatusCode} {errorBody}");
+            return $"Filter {filterId}";
+        }
+
+        var payload = await response.Content.ReadAsStringAsync();
+        var filter = JsonSerializer.Deserialize<JiraFilterResponse>(payload, JsonOptions);
+        return string.IsNullOrWhiteSpace(filter?.Name) ? $"Filter {filterId}" : filter.Name;
+    }
+
     private static async Task<bool> SendEmailAsync(
         HttpClient client,
         SendGridSettings settings,
@@ -209,19 +267,104 @@ internal static class Program
         return response.IsSuccessStatusCode;
     }
 
-    private static string ApplyTemplate(string template, JiraIssue issue, int filterId, string baseUrl)
+    private static string ApplyUserTemplate(
+        string template,
+        AssigneeBucket bucket,
+        int issueCount,
+        string baseUrl,
+        bool useHtml,
+        bool appendFiltersWhenMissing)
     {
-        var issueUrl = $"{EnsureTrailingSlash(baseUrl)}browse/{issue.Key}";
-        return template
-            .Replace("{Key}", issue.Key ?? string.Empty, StringComparison.OrdinalIgnoreCase)
-            .Replace("{Summary}", issue.Fields.Summary ?? string.Empty, StringComparison.OrdinalIgnoreCase)
-            .Replace("{Assignee}", issue.Fields.Assignee?.DisplayName ?? string.Empty, StringComparison.OrdinalIgnoreCase)
-            .Replace("{FilterId}", filterId.ToString(), StringComparison.OrdinalIgnoreCase)
-            .Replace("{IssueUrl}", issueUrl, StringComparison.OrdinalIgnoreCase);
+        var resolved = template
+            .Replace("{Assignee}", bucket.DisplayName ?? bucket.Email, StringComparison.OrdinalIgnoreCase)
+            .Replace("{IssueCount}", issueCount.ToString(), StringComparison.OrdinalIgnoreCase);
+
+        var filtersBlock = BuildFiltersBlock(bucket, baseUrl, useHtml);
+        if (resolved.Contains("{Filters}", StringComparison.OrdinalIgnoreCase))
+        {
+            return resolved.Replace("{Filters}", filtersBlock, StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (!appendFiltersWhenMissing)
+        {
+            return resolved;
+        }
+
+        return useHtml ? $"{resolved}<br/><br/>{filtersBlock}" : $"{resolved}\n\n{filtersBlock}";
+    }
+
+    private static string BuildFiltersBlock(AssigneeBucket bucket, string baseUrl, bool useHtml)
+    {
+        var builder = new StringBuilder();
+        foreach (var filter in bucket.Filters.Values.OrderBy(f => f.FilterName, StringComparer.OrdinalIgnoreCase))
+        {
+            var filterUrl = $"{EnsureTrailingSlash(baseUrl)}issues/?filter={filter.FilterId}";
+            if (useHtml)
+            {
+                builder.AppendLine($"<a href=\"{filterUrl}\">{WebUtility.HtmlEncode(filter.FilterName)} ({filter.Issues.Count})</a><br/>");
+                builder.AppendLine("<ul>");
+            }
+            else
+            {
+                builder.AppendLine($"Filter: {filter.FilterName} ({filter.FilterId}) {filterUrl}");
+            }
+
+            foreach (var issue in filter.Issues)
+            {
+                if (useHtml)
+                {
+                    builder.Append("<li><a href=\"")
+                        .Append(issue.IssueUrl)
+                        .Append("\">")
+                        .Append(WebUtility.HtmlEncode(issue.Key))
+                        .Append("</a>: ")
+                        .Append(WebUtility.HtmlEncode(issue.Summary))
+                        .AppendLine("</li>");
+                }
+                else
+                {
+                    builder.Append("- ")
+                        .Append(issue.Key)
+                        .Append(": ")
+                        .Append(issue.Summary)
+                        .Append(" ")
+                        .Append(issue.IssueUrl)
+                        .AppendLine();
+                }
+            }
+
+            if (useHtml)
+            {
+                builder.AppendLine("</ul>");
+                builder.AppendLine("<br/>");
+            }
+            else
+            {
+                builder.AppendLine();
+            }
+        }
+
+        return builder.ToString().TrimEnd();
     }
 
     private static string EnsureTrailingSlash(string value) =>
         value.EndsWith("/", StringComparison.Ordinal) ? value : $"{value}/";
+
+    private static string? ResolveSettingsPath()
+    {
+        var localPath = Path.Combine(AppContext.BaseDirectory, SettingsFileName);
+        if (File.Exists(localPath))
+        {
+            return localPath;
+        }
+
+        if (File.Exists(SettingsFileName))
+        {
+            return SettingsFileName;
+        }
+
+        return null;
+    }
 }
 
 sealed class AppSettings
@@ -243,8 +386,8 @@ sealed class SendGridSettings
     public string ApiKey { get; set; } = string.Empty;
     public string FromEmail { get; set; } = string.Empty;
     public string FromName { get; set; } = "Jira Data Hygiene";
-    public string SubjectTemplate { get; set; } = "[Jira] {Key} - {Summary}";
-    public string BodyTemplate { get; set; } = "Hello {Assignee},\n\nPlease review {Key}: {Summary}\n{IssueUrl}\n\nFilter: {FilterId}";
+    public string SubjectTemplate { get; set; } = "[Jira] {IssueCount} issues for {Assignee}";
+    public string BodyTemplate { get; set; } = "Hello {Assignee},\n\nPlease review the following {IssueCount} issues that are in inconsistent state:\n{Filters}";
     public string ContentType { get; set; } = "text/plain";
     public bool DryRun { get; set; }
 }
@@ -253,6 +396,11 @@ sealed class JiraSearchResponse
 {
     public int Total { get; set; }
     public List<JiraIssue> Issues { get; set; } = [];
+}
+
+sealed class JiraFilterResponse
+{
+    public string Name { get; set; } = string.Empty;
 }
 
 
@@ -298,4 +446,46 @@ sealed class SendGridContent
 {
     public string Type { get; set; } = "text/plain";
     public string Value { get; set; } = string.Empty;
+}
+
+sealed record IssueEntry(string Key, string Summary, int FilterId, string IssueUrl);
+
+sealed class AssigneeBucket
+{
+    public AssigneeBucket(string email, string? displayName)
+    {
+        Email = email;
+        DisplayName = displayName;
+    }
+
+    public string Email { get; }
+    public string? DisplayName { get; }
+    public Dictionary<int, FilterBucket> Filters { get; } = [];
+}
+
+sealed class FilterIssues
+{
+    public FilterIssues(int filterId, string filterName, List<JiraIssue> issues)
+    {
+        FilterId = filterId;
+        FilterName = filterName;
+        Issues = issues;
+    }
+
+    public int FilterId { get; }
+    public string FilterName { get; }
+    public List<JiraIssue> Issues { get; }
+}
+
+sealed class FilterBucket
+{
+    public FilterBucket(int filterId, string filterName)
+    {
+        FilterId = filterId;
+        FilterName = filterName;
+    }
+
+    public int FilterId { get; }
+    public string FilterName { get; }
+    public List<IssueEntry> Issues { get; } = [];
 }
