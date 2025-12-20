@@ -101,6 +101,9 @@ internal static class Program
             }
         }
 
+        var dryRunSentCount = 0;
+        var dryRunMax = settings.SendGrid.DryRunMaxEmails;
+
         foreach (var bucket in assignees.Values)
         {
             var issueCount = bucket.Filters.Values.Sum(filter => filter.Issues.Count);
@@ -111,17 +114,29 @@ internal static class Program
                 issueCount,
                 settings.Jira.BaseUrl,
                 useHtml,
-                appendFiltersWhenMissing: false);
+                appendFiltersWhenMissing: false,
+                includeFooter: false,
+                footerHtml: settings.SendGrid.FooterHtml,
+                footerText: settings.SendGrid.FooterText);
             var body = ApplyUserTemplate(
                 settings.SendGrid.BodyTemplate,
                 bucket,
                 issueCount,
                 settings.Jira.BaseUrl,
                 useHtml,
-                appendFiltersWhenMissing: true);
+                appendFiltersWhenMissing: true,
+                includeFooter: true,
+                footerHtml: settings.SendGrid.FooterHtml,
+                footerText: settings.SendGrid.FooterText);
 
             var toEmail = settings.SendGrid.DryRun ? "tiaandra@cisco.com" : bucket.Email;
             var toName = settings.SendGrid.DryRun ? "Tiaandra Cisco" : (bucket.DisplayName ?? bucket.Email);
+
+            if (settings.SendGrid.DryRun && dryRunMax > 0 && dryRunSentCount >= dryRunMax)
+            {
+                Console.WriteLine($"[DryRun] Reached DryRunMaxEmails ({dryRunMax}). Skipping remaining emails.");
+                break;
+            }
 
             var sent = await SendEmailAsync(
                 sendGridClient,
@@ -130,6 +145,11 @@ internal static class Program
                 toName,
                 subject,
                 body);
+
+            if (settings.SendGrid.DryRun)
+            {
+                dryRunSentCount++;
+            }
 
             Console.WriteLine(sent
                 ? $"{(settings.SendGrid.DryRun ? "[DryRun] " : string.Empty)}Sent email to {toEmail} for {issueCount} issues."
@@ -273,7 +293,10 @@ internal static class Program
         int issueCount,
         string baseUrl,
         bool useHtml,
-        bool appendFiltersWhenMissing)
+        bool appendFiltersWhenMissing,
+        bool includeFooter,
+        string footerHtml,
+        string footerText)
     {
         var resolved = template
             .Replace("{Assignee}", bucket.DisplayName ?? bucket.Email, StringComparison.OrdinalIgnoreCase)
@@ -282,15 +305,21 @@ internal static class Program
         var filtersBlock = BuildFiltersBlock(bucket, baseUrl, useHtml);
         if (resolved.Contains("{Filters}", StringComparison.OrdinalIgnoreCase))
         {
-            return resolved.Replace("{Filters}", filtersBlock, StringComparison.OrdinalIgnoreCase);
+            resolved = resolved.Replace("{Filters}", filtersBlock, StringComparison.OrdinalIgnoreCase);
         }
 
-        if (!appendFiltersWhenMissing)
+        if (appendFiltersWhenMissing)
+        {
+            resolved = useHtml ? $"{resolved}<br/><br/>{filtersBlock}" : $"{resolved}\n\n{filtersBlock}";
+        }
+
+        if (!includeFooter)
         {
             return resolved;
         }
 
-        return useHtml ? $"{resolved}<br/><br/>{filtersBlock}" : $"{resolved}\n\n{filtersBlock}";
+        var footer = BuildFooter(useHtml, footerHtml, footerText);
+        return useHtml ? $"{resolved}<br/><br/>{footer}" : $"{resolved}\n\n{footer}";
     }
 
     private static string BuildFiltersBlock(AssigneeBucket bucket, string baseUrl, bool useHtml)
@@ -336,7 +365,7 @@ internal static class Program
             if (useHtml)
             {
                 builder.AppendLine("</ul>");
-                builder.AppendLine("<br/>");
+                // builder.AppendLine("<br/>");
             }
             else
             {
@@ -345,6 +374,16 @@ internal static class Program
         }
 
         return builder.ToString().TrimEnd();
+    }
+
+    private static string BuildFooter(bool useHtml, string footerHtml, string footerText)
+    {
+        if (useHtml)
+        {
+            return footerHtml;
+        }
+
+        return footerText;
     }
 
     private static string EnsureTrailingSlash(string value) =>
@@ -390,6 +429,9 @@ sealed class SendGridSettings
     public string BodyTemplate { get; set; } = "Hello {Assignee},\n\nPlease review the following {IssueCount} issues that are in inconsistent state:\n{Filters}";
     public string ContentType { get; set; } = "text/plain";
     public bool DryRun { get; set; }
+    public int DryRunMaxEmails { get; set; }
+    public string FooterHtml { get; set; } = "This is an automated email. For any questions please reachout to <a href=\"mailto:tiaandra@cisco.com\">Tiago Andrade e Silva</a>. This is part of data hygiene process. The goal is that your name does not show up in the <a href=\"https://thousandeyes.atlassian.net/jira/dashboards/15665\">Data Hygiene dashboard</a>.";
+    public string FooterText { get; set; } = "This is an automated email. For any questions please reachout to tiaandra@cisco.com. This is part of data hygiene process. The goal is that your name does not show up in the Data Hygiene dashboard: https://thousandeyes.atlassian.net/jira/dashboards/15665";
 }
 
 sealed class JiraSearchResponse
