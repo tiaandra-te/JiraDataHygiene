@@ -25,32 +25,27 @@ dotnet build JiraDAtaHygiene.sln
 ```
 
 ## Email Example
-```html
-Hello Jane Doe,<br><br>
-Please review the following 6 issues that are in an incorrect state, grouped by Exception:<br><br>
-<a href="https://your-domain.atlassian.net/issues/?filter=31553">DataHygiene - Engineering Sub Teams Required is empty (2)</a><br>
-<div><em>Missing the sub teams that will be needed to implement this feature.</em></div><br>
-<ul>
-  <li><a href="https://your-domain.atlassian.net/browse/PR-1718">PR-1718</a>: Forwarding Loss support in Path viz</li>
-  <li><a href="https://your-domain.atlassian.net/browse/PR-1577">PR-1577</a>: Pagination support in datapoints API</li>
-</ul>
-<a href="https://your-domain.atlassian.net/issues/?filter=31552">DataHygiene - Engineering Teams Required is empty (2)</a><br>
-<div><em>Please identify the engineering group that will implement this feature.</em></div><br>
-<ul>
-  <li><a href="https://your-domain.atlassian.net/browse/PR-1718">PR-1718</a>: Forwarding Loss support in Path viz</li>
-  <li><a href="https://your-domain.atlassian.net/browse/PR-1577">PR-1577</a>: Pagination support in datapoints API</li>
-</ul>
-<a href="https://your-domain.atlassian.net/issues/?filter=31554">DataHygiene - No Request Type (2)</a><br>
-<div><em>Missing Request Type. Update to reflect Product Roadmap, Engineering Enabler, or KTLO.</em></div><br>
-<ul>
-  <li><a href="https://your-domain.atlassian.net/browse/PR-1718">PR-1718</a>: Forwarding Loss support in Path viz</li>
-  <li><a href="https://your-domain.atlassian.net/browse/PR-1577">PR-1577</a>: Pagination support in datapoints API</li>
-</ul><br><br>
-This is an automated email. For any questions please reach out to
-<a href="mailto:tiaandra@cisco.com">Tiago Andrade e Silva</a>. This is part of data hygiene process.
-The goal is that your name does not show up in the
-<a href="https://your-domain.atlassian.net/jira/dashboards/15665">Data Hygiene dashboard</a>.
-```
+Hello Jane Doe,
+
+Please review the following 6 issues that are in an incorrect state, grouped by Exception:
+
+DataHygiene - Engineering Sub Teams Required is empty (2)
+Missing the sub teams that will be needed to implement this feature.
+- PR-1718: Forwarding Loss support in Path viz
+- PR-1577: Pagination support in datapoints API
+
+DataHygiene - Engineering Teams Required is empty (2)
+Please identify the engineering group that will implement this feature.
+- PR-1718: Forwarding Loss support in Path viz
+- PR-1577: Pagination support in datapoints API
+
+DataHygiene - No Request Type (2)
+Missing Request Type. Update to reflect Product Roadmap, Engineering Enabler, or KTLO.
+- PR-1718: Forwarding Loss support in Path viz
+- PR-1577: Pagination support in datapoints API
+
+This is an automated email. For any questions please reach out to Tiago Andrade e Silva.
+This is part of data hygiene process. The goal is that your name does not show up in the Data Hygiene dashboard.
 
 ## Configuration
 `appsettings.json` settings:
