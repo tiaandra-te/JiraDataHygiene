@@ -10,8 +10,9 @@ Console app that loads Jira issues from a list of filter IDs and emails each ass
 ## Setup
 1. Copy settings and fill in your values:
    - `appsettings.example.json` -> `appsettings.json`
-2. Add your Jira filter IDs.
-3. Set `SendGrid.DryRun` to `true` while testing.
+2. Add your Jira filter IDs. For [example](https://thousandeyes.atlassian.net/issues/?filter=31552)
+3. Get your [Jira token](https://id.atlassian.com/manage-profile/security/api-tokens)
+4. Set `SendGrid.DryRun` to `true` while testing.
 
 ## Run
 ```bash
