@@ -248,6 +248,7 @@ internal static class Program
         string subject,
         string body)
     {
+        var ccList = BuildCcList(settings);
         var payload = new SendGridEmailRequest
         {
             From = new SendGridEmailAddress
@@ -267,6 +268,7 @@ internal static class Program
                             Name = toName
                         }
                     ],
+                    Cc = ccList,
                     Subject = subject
                 }
             ],
@@ -285,6 +287,22 @@ internal static class Program
         content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
         using var response = await client.PostAsync("v3/mail/send", content);
         return response.IsSuccessStatusCode;
+    }
+
+    private static List<SendGridEmailAddress> BuildCcList(SendGridSettings settings)
+    {
+        if (string.IsNullOrWhiteSpace(settings.CcEmails))
+        {
+            return [];
+        }
+
+        var items = settings.CcEmails
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(email => !string.IsNullOrWhiteSpace(email))
+            .Select(email => new SendGridEmailAddress { Email = email })
+            .ToList();
+
+        return items;
     }
 
     private static string ApplyUserTemplate(
@@ -433,6 +451,7 @@ sealed class SendGridSettings
     public int DryRunMaxEmails { get; set; }
     public string FooterHtml { get; set; } = "This is an automated email. For any questions please reachout to <a href=\"mailto:tiaandra@cisco.com\">Tiago Andrade e Silva</a>. This is part of data hygiene process. The goal is that your name does not show up in the <a href=\"https://thousandeyes.atlassian.net/jira/dashboards/15665\">Data Hygiene dashboard</a>.";
     public string FooterText { get; set; } = "This is an automated email. For any questions please reachout to tiaandra@cisco.com. This is part of data hygiene process. The goal is that your name does not show up in the Data Hygiene dashboard: https://thousandeyes.atlassian.net/jira/dashboards/15665";
+    public string CcEmails { get; set; } = string.Empty;
 }
 
 sealed class JiraSearchResponse
@@ -476,6 +495,7 @@ sealed class SendGridEmailRequest
 sealed class SendGridPersonalization
 {
     public List<SendGridEmailAddress> To { get; set; } = [];
+    public List<SendGridEmailAddress> Cc { get; set; } = [];
     public string Subject { get; set; } = string.Empty;
 }
 

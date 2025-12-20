@@ -1,6 +1,6 @@
 # Jira Data Hygiene
 
-Console app that loads Jira issues from a list of filter IDs and emails each assignee via SendGrid.
+Console app that loads Jira issues from multiple filter IDs, aggregates them per assignee, and sends a single email per user with issues grouped by filter.
 
 ## Requirements
 - .NET SDK 9+
@@ -20,21 +20,25 @@ dotnet run --project JiraDAtaHygiene.sln
 ```
 
 ## Configuration
-Key settings in `appsettings.json`:
-- `Jira.BaseUrl`
-- `Jira.Email`
-- `Jira.ApiToken`
-- `Jira.FilterIds`
-- `SendGrid.ApiKey`
-- `SendGrid.FromEmail`
-- `SendGrid.FromName`
-- `SendGrid.SubjectTemplate`
-- `SendGrid.BodyTemplate`
-- `SendGrid.ContentType` (`text/plain` or `text/html`)
-- `SendGrid.DryRun` (logs only)
+`appsettings.json` settings:
+- `Jira.BaseUrl`: Jira Cloud base URL, e.g. `https://your-domain.atlassian.net/`.
+- `Jira.Email`: Jira user email for API auth.
+- `Jira.ApiToken`: Jira API token.
+- `Jira.FilterIds`: List of filter IDs to load.
+- `SendGrid.ApiKey`: SendGrid API key.
+- `SendGrid.FromEmail`: From address for outbound email.
+- `SendGrid.FromName`: From display name.
+- `SendGrid.SubjectTemplate`: Subject template supporting `{Assignee}` and `{IssueCount}`.
+- `SendGrid.BodyTemplate`: Body template supporting `{Assignee}`, `{IssueCount}`, `{Filters}`.
+- `SendGrid.ContentType`: `text/plain` or `text/html` (HTML enables links).
+- `SendGrid.DryRun`: If `true`, emails send to the dry-run recipient.
+- `SendGrid.DryRunMaxEmails`: Max emails to send in dry-run mode (0 = no limit).
+- `SendGrid.FooterHtml`: Footer for HTML emails.
+- `SendGrid.FooterText`: Footer for plain-text emails.
+- `SendGrid.CcEmails`: Comma-separated CC list applied to all emails.
 
 Template placeholders:
-- `{Key}`, `{Summary}`, `{Assignee}`, `{FilterId}`, `{IssueUrl}`
+- `{Assignee}`, `{IssueCount}`, `{Filters}`
 
 ## Notes
 - Jira Cloud may not expose assignee email addresses depending on privacy settings.
