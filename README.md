@@ -30,16 +30,19 @@ Hello Jane Doe,
 Please review the following 6 issues that are in an incorrect state, grouped by Exception:
 
 [DataHygiene - Engineering Sub Teams Required is empty](https://thousandeyes.atlassian.net/issues/?filter=31553) (2)
+
 Missing the sub teams that will be needed to implement this feature.
 - PR-1718: Forwarding Loss support in Path viz
 - PR-1577: Pagination support in datapoints API
 
 [DataHygiene - Engineering Teams Required is empty](https://thousandeyes.atlassian.net/issues/?filter=31552) (2)
+
 Please identify the engineering group that will implement this feature.
 - PR-1718: Forwarding Loss support in Path viz
 - PR-1577: Pagination support in datapoints API
 
 [DataHygiene - No Request Type](https://thousandeyes.atlassian.net/issues/?filter=31554) (2)
+
 Missing Request Type. Update to reflect Product Roadmap, Engineering Enabler, or KTLO.
 - PR-1718: Forwarding Loss support in Path viz
 - PR-1577: Pagination support in datapoints API
