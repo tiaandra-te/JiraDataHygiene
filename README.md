@@ -1,6 +1,6 @@
 # Jira Data Hygiene
 
-Console app that loads Jira issues from multiple filter IDs, aggregates them per assignee, and sends a single email per user with issues grouped by filter.
+Console app that loads Jira issues from multiple filter IDs, aggregates them per assignee, and sends a single email per user with issues grouped by filter so they know what issues need to be addressed.
 
 ## Requirements
 - .NET SDK 9+
@@ -72,6 +72,18 @@ This is part of data hygiene process. The goal is that your name does not show u
 
 Template placeholders:
 - `{Assignee}`, `{IssueCount}`, `{Filters}`
+
+## Code Structure
+- `Program.cs`: App entry point and orchestration (load settings, fetch Jira data, build emails, send).
+- `Config/Settings.cs`: Configuration models for Jira and SendGrid settings.
+- `Models/JiraModels.cs`: Jira API response and issue models.
+- `Models/SendGridModels.cs`: SendGrid request payload models.
+- `Models/FilterModels.cs`: Aggregation models for filters, assignees, and issues.
+- `Services/JiraService.cs`: Jira API client wrapper (filters + issues).
+- `Services/SendGridService.cs`: SendGrid API client wrapper (email send + error logging).
+- `Services/EmailTemplateBuilder.cs`: Email body/subject templating and formatting.
+- `Utils/SettingsLoader.cs`: Settings file resolution and JSON deserialization.
+- `Utils/UrlHelper.cs`: URL helpers (e.g., ensure trailing slash).
 
 ## Notes
 - Jira Cloud may not expose assignee email addresses depending on privacy settings.

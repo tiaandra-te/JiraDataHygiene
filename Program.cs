@@ -1,9 +1,11 @@
-using System.Net.Http.Headers;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Linq;
-using System.Net;
+using JiraDataHygiene.Config;
+using JiraDataHygiene.Models;
+using JiraDataHygiene.Services;
+using JiraDataHygiene.Utils;
+
+namespace JiraDataHygiene;
 
 internal static class Program
 {
@@ -18,7 +20,7 @@ internal static class Program
 
     private static async Task<int> Main()
     {
-        var settingsPath = ResolveSettingsPath();
+        var settingsPath = SettingsLoader.ResolveSettingsPath(SettingsFileName);
         if (settingsPath is null)
         {
             Console.Error.WriteLine($"Missing {SettingsFileName}. Create it based on appsettings.example.json.");
@@ -28,8 +30,7 @@ internal static class Program
         AppSettings? settings;
         try
         {
-            var settingsJson = await File.ReadAllTextAsync(settingsPath);
-            settings = JsonSerializer.Deserialize<AppSettings>(settingsJson, JsonOptions);
+            settings = await SettingsLoader.LoadAsync(settingsPath, JsonOptions);
         }
         catch (Exception ex)
         {
@@ -49,20 +50,82 @@ internal static class Program
             return 1;
         }
 
-        using var jiraClient = CreateJiraClient(settings.Jira);
-        using var sendGridClient = CreateSendGridClient(settings.SendGrid);
+        using var jiraClient = JiraService.CreateClient(settings.Jira);
+        using var sendGridClient = SendGridService.CreateClient(settings.SendGrid);
 
-        var filters = new List<FilterIssues>();
+        var jiraService = new JiraService(jiraClient, JsonOptions);
+        var sendGridService = new SendGridService(sendGridClient, JsonOptions);
 
+        var issuesByFilter = new List<FilterIssues>();
         foreach (var filterConfig in settings.Jira.Filters)
         {
-            var filterId = filterConfig.Id;
-            Console.WriteLine($"Loading issues for filter {filterId}...");
-            var filterName = await LoadFilterNameAsync(jiraClient, filterId);
-            var issues = await LoadIssuesForFilterAsync(jiraClient, filterId);
-            filters.Add(new FilterIssues(filterId, filterName, filterConfig.Description, issues));
+            Console.WriteLine($"Loading issues for filter {filterConfig.Id}...");
+            var filterName = await jiraService.LoadFilterNameAsync(filterConfig.Id);
+            var issues = await jiraService.LoadIssuesForFilterAsync(filterConfig.Id);
+            issuesByFilter.Add(new FilterIssues(filterConfig.Id, filterName, filterConfig.Description, issues));
         }
 
+        var assignees = BuildAssigneeBuckets(settings.Jira.BaseUrl, issuesByFilter);
+
+        var useHtml = string.Equals(settings.SendGrid.ContentType, "text/html", StringComparison.OrdinalIgnoreCase);
+        var templateBuilder = new EmailTemplateBuilder(
+            settings.Jira.BaseUrl,
+            useHtml,
+            settings.SendGrid.FooterHtml,
+            settings.SendGrid.FooterText);
+
+        var dryRunSentCount = 0;
+        var dryRunMax = settings.SendGrid.DryRunMaxEmails;
+
+        foreach (var bucket in assignees.Values)
+        {
+            var issueCount = bucket.Filters.Values.Sum(filter => filter.Issues.Count);
+            var subject = templateBuilder.Build(
+                settings.SendGrid.SubjectTemplate,
+                bucket,
+                issueCount,
+                appendFiltersWhenMissing: false,
+                includeFooter: false);
+            var body = templateBuilder.Build(
+                settings.SendGrid.BodyTemplate,
+                bucket,
+                issueCount,
+                appendFiltersWhenMissing: true,
+                includeFooter: true);
+
+            var toEmail = settings.SendGrid.DryRun ? "tiaandra@cisco.com" : bucket.Email;
+            var toName = settings.SendGrid.DryRun ? "Tiaandra Cisco" : (bucket.DisplayName ?? bucket.Email);
+
+            if (settings.SendGrid.DryRun && dryRunMax > 0 && dryRunSentCount >= dryRunMax)
+            {
+                Console.WriteLine($"[DryRun] Reached DryRunMaxEmails ({dryRunMax}). Skipping remaining emails.");
+                break;
+            }
+
+            var sent = await sendGridService.SendAsync(
+                settings.SendGrid,
+                toEmail,
+                toName,
+                subject,
+                body);
+
+            if (settings.SendGrid.DryRun)
+            {
+                dryRunSentCount++;
+            }
+
+            Console.WriteLine(sent
+                ? $"{(settings.SendGrid.DryRun ? "[DryRun] " : string.Empty)}Sent email to {toEmail} for {issueCount} issues."
+                : $"{(settings.SendGrid.DryRun ? "[DryRun] " : string.Empty)}Failed to send email to {toEmail} for {issueCount} issues.");
+        }
+
+        return 0;
+    }
+
+    private static Dictionary<string, AssigneeBucket> BuildAssigneeBuckets(
+        string baseUrl,
+        IEnumerable<FilterIssues> filters)
+    {
         var assignees = new Dictionary<string, AssigneeBucket>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var filter in filters)
@@ -98,476 +161,10 @@ internal static class Program
                     issue.Key,
                     issue.Fields.Summary,
                     filter.FilterId,
-                    $"{EnsureTrailingSlash(settings.Jira.BaseUrl)}browse/{issue.Key}"));
+                    $"{UrlHelper.EnsureTrailingSlash(baseUrl)}browse/{issue.Key}"));
             }
         }
 
-        var dryRunSentCount = 0;
-        var dryRunMax = settings.SendGrid.DryRunMaxEmails;
-
-        foreach (var bucket in assignees.Values)
-        {
-            var issueCount = bucket.Filters.Values.Sum(filter => filter.Issues.Count);
-            var useHtml = string.Equals(settings.SendGrid.ContentType, "text/html", StringComparison.OrdinalIgnoreCase);
-            var subject = ApplyUserTemplate(
-                settings.SendGrid.SubjectTemplate,
-                bucket,
-                issueCount,
-                settings.Jira.BaseUrl,
-                useHtml,
-                appendFiltersWhenMissing: false,
-                includeFooter: false,
-                footerHtml: settings.SendGrid.FooterHtml,
-                footerText: settings.SendGrid.FooterText);
-            var body = ApplyUserTemplate(
-                settings.SendGrid.BodyTemplate,
-                bucket,
-                issueCount,
-                settings.Jira.BaseUrl,
-                useHtml,
-                appendFiltersWhenMissing: true,
-                includeFooter: true,
-                footerHtml: settings.SendGrid.FooterHtml,
-                footerText: settings.SendGrid.FooterText);
-
-            var toEmail = settings.SendGrid.DryRun ? "tiaandra@cisco.com" : bucket.Email;
-            var toName = settings.SendGrid.DryRun ? "Tiaandra Cisco" : (bucket.DisplayName ?? bucket.Email);
-
-            if (settings.SendGrid.DryRun && dryRunMax > 0 && dryRunSentCount >= dryRunMax)
-            {
-                Console.WriteLine($"[DryRun] Reached DryRunMaxEmails ({dryRunMax}). Skipping remaining emails.");
-                break;
-            }
-
-            var sent = await SendEmailAsync(
-                sendGridClient,
-                settings.SendGrid,
-                toEmail,
-                toName,
-                subject,
-                body);
-
-            if (settings.SendGrid.DryRun)
-            {
-                dryRunSentCount++;
-            }
-
-            Console.WriteLine(sent
-                ? $"{(settings.SendGrid.DryRun ? "[DryRun] " : string.Empty)}Sent email to {toEmail} for {issueCount} issues."
-                : $"{(settings.SendGrid.DryRun ? "[DryRun] " : string.Empty)}Failed to send email to {toEmail} for {issueCount} issues.");
-        }
-
-        return 0;
+        return assignees;
     }
-
-    private static HttpClient CreateJiraClient(JiraSettings jira)
-    {
-        var client = new HttpClient
-        {
-            BaseAddress = new Uri(EnsureTrailingSlash(jira.BaseUrl))
-        };
-
-        var authBytes = Encoding.UTF8.GetBytes($"{jira.Email}:{jira.ApiToken}");
-        client.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Basic", Convert.ToBase64String(authBytes));
-        client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-        return client;
-    }
-
-    private static HttpClient CreateSendGridClient(SendGridSettings sendGrid)
-    {
-        var client = new HttpClient
-        {
-            BaseAddress = new Uri("https://api.sendgrid.com/")
-        };
-        client.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", sendGrid.ApiKey);
-        return client;
-    }
-
-    private static async Task<List<JiraIssue>> LoadIssuesForFilterAsync(HttpClient client, int filterId)
-    {
-        var issues = new List<JiraIssue>();
-        var startAt = 0;
-        var maxResults = 50;
-
-        while (true)
-        {
-            var jql = $"filter={filterId}";
-            var fields = "summary,assignee";
-            var url =
-                $"rest/api/3/search/jql?jql={Uri.EscapeDataString(jql)}&startAt={startAt}&maxResults={maxResults}&fields={Uri.EscapeDataString(fields)}";
-
-            using var response = await client.GetAsync(url);
-            if (!response.IsSuccessStatusCode)
-            {
-                var errorBody = await response.Content.ReadAsStringAsync();
-                Console.WriteLine($"Failed to load filter {filterId}: {response.StatusCode} {errorBody}");
-                break;
-            }
-
-            var payload = await response.Content.ReadAsStringAsync();
-            var search = JsonSerializer.Deserialize<JiraSearchResponse>(payload, JsonOptions);
-            if (search?.Issues is null || search.Issues.Count == 0)
-            {
-                break;
-            }
-
-            issues.AddRange(search.Issues);
-            startAt += search.Issues.Count;
-
-            if (startAt >= search.Total)
-            {
-                break;
-            }
-        }
-
-        return issues;
-    }
-
-    private static async Task<string> LoadFilterNameAsync(HttpClient client, int filterId)
-    {
-        var url = $"rest/api/3/filter/{filterId}";
-        using var response = await client.GetAsync(url);
-        if (!response.IsSuccessStatusCode)
-        {
-            var errorBody = await response.Content.ReadAsStringAsync();
-            Console.WriteLine($"Failed to load filter name {filterId}: {response.StatusCode} {errorBody}");
-            return $"Filter {filterId}";
-        }
-
-        var payload = await response.Content.ReadAsStringAsync();
-        var filter = JsonSerializer.Deserialize<JiraFilterResponse>(payload, JsonOptions);
-        return string.IsNullOrWhiteSpace(filter?.Name) ? $"Filter {filterId}" : filter.Name;
-    }
-
-    private static async Task<bool> SendEmailAsync(
-        HttpClient client,
-        SendGridSettings settings,
-        string toEmail,
-        string toName,
-        string subject,
-        string body)
-    {
-        var ccList = BuildCcList(settings);
-        var payload = new SendGridEmailRequest
-        {
-            From = new SendGridEmailAddress
-            {
-                Email = settings.FromEmail,
-                Name = settings.FromName
-            },
-            Personalizations =
-            [
-                new SendGridPersonalization
-                {
-                    To =
-                    [
-                        new SendGridEmailAddress
-                        {
-                            Email = toEmail,
-                            Name = toName
-                        }
-                    ],
-                    Cc = ccList,
-                    Subject = subject
-                }
-            ],
-            Content =
-            [
-                new SendGridContent
-                {
-                    Type = settings.ContentType,
-                    Value = body
-                }
-            ]
-        };
-
-        var json = JsonSerializer.Serialize(payload, JsonOptions);
-        using var content = new StringContent(json, Encoding.UTF8);
-        content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-        using var response = await client.PostAsync("v3/mail/send", content);
-        return response.IsSuccessStatusCode;
-    }
-
-    private static List<SendGridEmailAddress> BuildCcList(SendGridSettings settings)
-    {
-        if (string.IsNullOrWhiteSpace(settings.CcEmails))
-        {
-            return [];
-        }
-
-        var items = settings.CcEmails
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(email => !string.IsNullOrWhiteSpace(email))
-            .Select(email => new SendGridEmailAddress { Email = email })
-            .ToList();
-
-        return items;
-    }
-
-    private static string ApplyUserTemplate(
-        string template,
-        AssigneeBucket bucket,
-        int issueCount,
-        string baseUrl,
-        bool useHtml,
-        bool appendFiltersWhenMissing,
-        bool includeFooter,
-        string footerHtml,
-        string footerText)
-    {
-        var resolved = template
-            .Replace("{Assignee}", bucket.DisplayName ?? bucket.Email, StringComparison.OrdinalIgnoreCase)
-            .Replace("{IssueCount}", issueCount.ToString(), StringComparison.OrdinalIgnoreCase);
-
-        var filtersBlock = BuildFiltersBlock(bucket, baseUrl, useHtml);
-        var hasFiltersToken = resolved.Contains("{Filters}", StringComparison.OrdinalIgnoreCase);
-        if (hasFiltersToken)
-        {
-            resolved = resolved.Replace("{Filters}", filtersBlock, StringComparison.OrdinalIgnoreCase);
-        }
-
-        if (appendFiltersWhenMissing && !hasFiltersToken)
-        {
-            resolved = useHtml ? $"{resolved}<br/><br/>{filtersBlock}" : $"{resolved}\n\n{filtersBlock}";
-        }
-
-        if (!includeFooter)
-        {
-            return resolved;
-        }
-
-        var footer = BuildFooter(useHtml, footerHtml, footerText);
-        return useHtml ? $"{resolved}<br/><br/>{footer}" : $"{resolved}\n\n{footer}";
-    }
-
-    private static string BuildFiltersBlock(AssigneeBucket bucket, string baseUrl, bool useHtml)
-    {
-        var builder = new StringBuilder();
-        foreach (var filter in bucket.Filters.Values.OrderBy(f => f.FilterName, StringComparer.OrdinalIgnoreCase))
-        {
-            var filterUrl = $"{EnsureTrailingSlash(baseUrl)}issues/?filter={filter.FilterId}";
-            if (useHtml)
-            {
-                builder.AppendLine($"<a href=\"{filterUrl}\">{WebUtility.HtmlEncode(filter.FilterName)} ({filter.Issues.Count})</a><br/>");
-                if (!string.IsNullOrWhiteSpace(filter.Description))
-                {
-                    builder.AppendLine($"<div><em>{WebUtility.HtmlEncode(filter.Description)}</em></div><br/>");
-                }
-                builder.AppendLine("<ul>");
-            }
-            else
-            {
-                builder.AppendLine($"Filter: {filter.FilterName} ({filter.FilterId}) {filterUrl}");
-                if (!string.IsNullOrWhiteSpace(filter.Description))
-                {
-                    builder.AppendLine($"Description: {filter.Description}");
-                }
-            }
-
-            foreach (var issue in filter.Issues)
-            {
-                if (useHtml)
-                {
-                    builder.Append("<li><a href=\"")
-                        .Append(issue.IssueUrl)
-                        .Append("\">")
-                        .Append(WebUtility.HtmlEncode(issue.Key))
-                        .Append("</a>: ")
-                        .Append(WebUtility.HtmlEncode(issue.Summary))
-                        .AppendLine("</li>");
-                }
-                else
-                {
-                    builder.Append("- ")
-                        .Append(issue.Key)
-                        .Append(": ")
-                        .Append(issue.Summary)
-                        .Append(" ")
-                        .Append(issue.IssueUrl)
-                        .AppendLine();
-                }
-            }
-
-            if (useHtml)
-            {
-                builder.AppendLine("</ul>");
-                // builder.AppendLine("<br/>");
-            }
-            else
-            {
-                builder.AppendLine();
-            }
-        }
-
-        return builder.ToString().TrimEnd();
-    }
-
-    private static string BuildFooter(bool useHtml, string footerHtml, string footerText)
-    {
-        if (useHtml)
-        {
-            return footerHtml;
-        }
-
-        return footerText;
-    }
-
-    private static string EnsureTrailingSlash(string value) =>
-        value.EndsWith("/", StringComparison.Ordinal) ? value : $"{value}/";
-
-    private static string? ResolveSettingsPath()
-    {
-        var localPath = Path.Combine(AppContext.BaseDirectory, SettingsFileName);
-        if (File.Exists(localPath))
-        {
-            return localPath;
-        }
-
-        if (File.Exists(SettingsFileName))
-        {
-            return SettingsFileName;
-        }
-
-        return null;
-    }
-}
-
-sealed class AppSettings
-{
-    public JiraSettings Jira { get; set; } = new();
-    public SendGridSettings SendGrid { get; set; } = new();
-}
-
-sealed class JiraSettings
-{
-    public string BaseUrl { get; set; } = string.Empty;
-    public string Email { get; set; } = string.Empty;
-    public string ApiToken { get; set; } = string.Empty;
-    public List<JiraFilterConfig> Filters { get; set; } = [];
-}
-
-sealed class SendGridSettings
-{
-    public string ApiKey { get; set; } = string.Empty;
-    public string FromEmail { get; set; } = string.Empty;
-    public string FromName { get; set; } = "Jira Data Hygiene";
-    public string SubjectTemplate { get; set; } = "[Jira] {IssueCount} issues for {Assignee}";
-    public string BodyTemplate { get; set; } = "Hello {Assignee},\n\nPlease review the following {IssueCount} issues that are in inconsistent state:\n{Filters}";
-    public string ContentType { get; set; } = "text/plain";
-    public bool DryRun { get; set; }
-    public int DryRunMaxEmails { get; set; }
-    public string FooterHtml { get; set; } = "This is an automated email. For any questions please reachout to <a href=\"mailto:tiaandra@cisco.com\">Tiago Andrade e Silva</a>. This is part of data hygiene process. The goal is that your name does not show up in the <a href=\"https://thousandeyes.atlassian.net/jira/dashboards/15665\">Data Hygiene dashboard</a>.";
-    public string FooterText { get; set; } = "This is an automated email. For any questions please reachout to tiaandra@cisco.com. This is part of data hygiene process. The goal is that your name does not show up in the Data Hygiene dashboard: https://thousandeyes.atlassian.net/jira/dashboards/15665";
-    public string CcEmails { get; set; } = string.Empty;
-}
-
-sealed class JiraSearchResponse
-{
-    public int Total { get; set; }
-    public List<JiraIssue> Issues { get; set; } = [];
-}
-
-sealed class JiraFilterResponse
-{
-    public string Name { get; set; } = string.Empty;
-}
-
-
-sealed class JiraIssue
-{
-    public string Key { get; set; } = string.Empty;
-    public JiraIssueFields Fields { get; set; } = new();
-}
-
-sealed class JiraIssueFields
-{
-    public string Summary { get; set; } = string.Empty;
-    public JiraUser? Assignee { get; set; }
-}
-
-sealed class JiraUser
-{
-    public string? DisplayName { get; set; }
-    public string? EmailAddress { get; set; }
-    public string? AccountId { get; set; }
-}
-
-sealed class SendGridEmailRequest
-{
-    public List<SendGridPersonalization> Personalizations { get; set; } = [];
-    public SendGridEmailAddress From { get; set; } = new();
-    public List<SendGridContent> Content { get; set; } = [];
-}
-
-sealed class SendGridPersonalization
-{
-    public List<SendGridEmailAddress> To { get; set; } = [];
-    public List<SendGridEmailAddress> Cc { get; set; } = [];
-    public string Subject { get; set; } = string.Empty;
-}
-
-sealed class SendGridEmailAddress
-{
-    public string Email { get; set; } = string.Empty;
-    public string? Name { get; set; }
-}
-
-sealed class SendGridContent
-{
-    public string Type { get; set; } = "text/plain";
-    public string Value { get; set; } = string.Empty;
-}
-
-sealed record IssueEntry(string Key, string Summary, int FilterId, string IssueUrl);
-
-sealed class AssigneeBucket
-{
-    public AssigneeBucket(string email, string? displayName)
-    {
-        Email = email;
-        DisplayName = displayName;
-    }
-
-    public string Email { get; }
-    public string? DisplayName { get; }
-    public Dictionary<int, FilterBucket> Filters { get; } = [];
-}
-
-sealed class FilterIssues
-{
-    public FilterIssues(int filterId, string filterName, string description, List<JiraIssue> issues)
-    {
-        FilterId = filterId;
-        FilterName = filterName;
-        Description = description;
-        Issues = issues;
-    }
-
-    public int FilterId { get; }
-    public string FilterName { get; }
-    public string Description { get; }
-    public List<JiraIssue> Issues { get; }
-}
-
-sealed class FilterBucket
-{
-    public FilterBucket(int filterId, string filterName, string description)
-    {
-        FilterId = filterId;
-        FilterName = filterName;
-        Description = description;
-    }
-
-    public int FilterId { get; }
-    public string FilterName { get; }
-    public string Description { get; }
-    public List<IssueEntry> Issues { get; } = [];
-}
-
-sealed class JiraFilterConfig
-{
-    public int Id { get; set; }
-    public string Description { get; set; } = string.Empty;
 }
