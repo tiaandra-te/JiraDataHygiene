@@ -63,8 +63,8 @@ internal static class Program
         var issuesByFilter = new List<FilterIssues>();
         foreach (var filterConfig in settings.Jira.Filters)
         {
-            LogCollector.Info($"Loading issues for filter {filterConfig.Id}...");
             var filterName = await jiraService.LoadFilterNameAsync(filterConfig.Id);
+            LogCollector.Info($"Loading issues for filter {filterName}  ({filterConfig.Id}) ...");
             var issues = await jiraService.LoadIssuesForFilterAsync(filterConfig.Id);
             issuesByFilter.Add(new FilterIssues(filterConfig.Id, filterName, filterConfig.Description, issues));
         }
