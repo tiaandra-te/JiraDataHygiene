@@ -76,14 +76,29 @@ This is part of data hygiene process. The goal is that your name does not show u
 
 
 ## Code Structure
-- `Program.cs`: App entry point and orchestration (load settings, fetch Jira data, build emails, send).
+**Flow overview**
+- Load settings from `appsettings.json`.
+- Fetch all Jira filters + issues and group them by assignee.
+- Build one email per assignee (grouped by filter + optional footer).
+- Send via SendGrid (or dry-run limit).
+
+**Root**
+- `Program.cs`: App entry point and orchestration (settings, fetch, aggregate, send).
+
+**Config**
 - `Config/Settings.cs`: Configuration models for Jira and SendGrid settings.
+
+**Models**
 - `Models/JiraModels.cs`: Jira API response and issue models.
 - `Models/SendGridModels.cs`: SendGrid request payload models.
 - `Models/FilterModels.cs`: Aggregation models for filters, assignees, and issues.
-- `Services/JiraService.cs`: Jira API client wrapper (filters + issues).
-- `Services/SendGridService.cs`: SendGrid API client wrapper (email send + error logging).
+
+**Services**
+- `Services/JiraService.cs`: Jira API client wrapper (filter names + issues).
+- `Services/SendGridService.cs`: SendGrid API client wrapper (send + error logging).
 - `Services/EmailTemplateBuilder.cs`: Email body/subject templating and formatting.
+
+**Utils**
 - `Utils/SettingsLoader.cs`: Settings file resolution and JSON deserialization.
 - `Utils/UrlHelper.cs`: URL helpers (e.g., ensure trailing slash).
 
