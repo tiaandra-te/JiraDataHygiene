@@ -20,6 +20,8 @@ Console app that loads Jira issues from multiple filter IDs, aggregates them per
 - `Jira.BaseUrl`: Jira Cloud base URL, e.g. `https://your-domain.atlassian.net/`.
 - `Jira.Email`: Jira user email for API auth.
 - `Jira.ApiToken`: Jira API token.
+- `Jira.EnableComments`: If `true`, add a Jira comment per issue using the filter description.
+- `Jira.LogComments`: If `true`, log comment text before posting.
 - `Jira.Filters`: List of filter entries with `Id` and `Description`.
 - `SendGrid.ApiKey`: SendGrid API key.
 - `SendGrid.FromEmail`: From address for outbound email.
@@ -32,6 +34,8 @@ Console app that loads Jira issues from multiple filter IDs, aggregates them per
 - `SendGrid.FooterHtml`: Footer for HTML emails.
 - `SendGrid.FooterText`: Footer for plain-text emails.
 - `SendGrid.CcEmails`: Comma-separated CC list applied to all emails.
+- `SendGrid.SendLogEmail`: If `true`, send a run log email at the end of execution.
+- `SendGrid.LogEmail`: Recipient for the run log email.
 
 Template placeholders:
 - `{Assignee}`, `{IssueCount}`, `{Filters}`

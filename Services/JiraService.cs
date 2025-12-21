@@ -48,7 +48,7 @@ public sealed class JiraService
             if (!response.IsSuccessStatusCode)
             {
                 var errorBody = await response.Content.ReadAsStringAsync();
-                Console.WriteLine($"Failed to load filter {filterId}: {response.StatusCode} {errorBody}");
+                LogCollector.Error($"Failed to load filter {filterId}: {response.StatusCode} {errorBody}");
                 break;
             }
 
@@ -78,12 +78,57 @@ public sealed class JiraService
         if (!response.IsSuccessStatusCode)
         {
             var errorBody = await response.Content.ReadAsStringAsync();
-            Console.WriteLine($"Failed to load filter name {filterId}: {response.StatusCode} {errorBody}");
+            LogCollector.Error($"Failed to load filter name {filterId}: {response.StatusCode} {errorBody}");
             return $"Filter {filterId}";
         }
 
         var payload = await response.Content.ReadAsStringAsync();
         var filter = JsonSerializer.Deserialize<JiraFilterResponse>(payload, _jsonOptions);
         return string.IsNullOrWhiteSpace(filter?.Name) ? $"Filter {filterId}" : filter.Name;
+    }
+
+    public async Task<bool> AddCommentAsync(string issueKey, string accountId, string message)
+    {
+        var url = $"rest/api/3/issue/{issueKey}/comment";
+        var payload = new
+        {
+            body = new
+            {
+                type = "doc",
+                version = 1,
+                content = new[]
+                {
+                    new
+                    {
+                        type = "paragraph",
+                        content = new object[]
+                        {
+                            new
+                            {
+                                type = "mention",
+                                attrs = new { id = accountId }
+                            },
+                            new
+                            {
+                                type = "text",
+                                text = $" {message} #datahygiene"
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        var json = JsonSerializer.Serialize(payload, _jsonOptions);
+        using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+        using var response = await _client.PostAsync(url, content);
+        if (response.IsSuccessStatusCode)
+        {
+            return true;
+        }
+
+        var errorBody = await response.Content.ReadAsStringAsync();
+        LogCollector.Error($"Failed to comment on {issueKey}: {response.StatusCode} {errorBody}");
+        return false;
     }
 }

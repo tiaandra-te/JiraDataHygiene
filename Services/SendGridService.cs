@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using JiraDataHygiene.Config;
 using JiraDataHygiene.Models;
+using JiraDataHygiene.Utils;
 
 namespace JiraDataHygiene.Services;
 
@@ -79,7 +80,7 @@ public sealed class SendGridService
         }
 
         var errorBody = await response.Content.ReadAsStringAsync();
-        Console.WriteLine($"SendGrid error {response.StatusCode}: {errorBody}");
+        LogCollector.Error($"SendGrid error {response.StatusCode}: {errorBody}");
         return false;
     }
 
@@ -97,5 +98,19 @@ public sealed class SendGridService
             .ToList();
 
         return items.Count == 0 ? null : items;
+    }
+
+    public Task<bool> SendLogAsync(SendGridSettings settings, string toEmail, string subject, string body)
+    {
+        var logSettings = new SendGridSettings
+        {
+            ApiKey = settings.ApiKey,
+            FromEmail = settings.FromEmail,
+            FromName = settings.FromName,
+            ContentType = "text/plain",
+            CcEmails = string.Empty
+        };
+
+        return SendAsync(logSettings, toEmail, toEmail, subject, body);
     }
 }
