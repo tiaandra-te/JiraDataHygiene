@@ -22,6 +22,8 @@ internal static class Program
     private static async Task<int> Main()
     {
         var stopwatch = Stopwatch.StartNew();
+        LogCollector.Info("Loading Jira issues from multiple data hygiene filters, aggregating them per assignee, and sending each person a email so they know what they need to do to fix data hygiene issues.");
+
         var settingsPath = SettingsLoader.ResolveSettingsPath(SettingsFileName);
         if (settingsPath is null)
         {
