@@ -14,6 +14,28 @@ Console app that loads Jira issues from multiple filter IDs, aggregates them per
 3. Get your [Jira token](https://id.atlassian.com/manage-profile/security/api-tokens)
 4. Set `SendGrid.DryRun` to `true` while testing.
 
+
+## Configuration
+`appsettings.json` settings:
+- `Jira.BaseUrl`: Jira Cloud base URL, e.g. `https://your-domain.atlassian.net/`.
+- `Jira.Email`: Jira user email for API auth.
+- `Jira.ApiToken`: Jira API token.
+- `Jira.Filters`: List of filter entries with `Id` and `Description`.
+- `SendGrid.ApiKey`: SendGrid API key.
+- `SendGrid.FromEmail`: From address for outbound email.
+- `SendGrid.FromName`: From display name.
+- `SendGrid.SubjectTemplate`: Subject template supporting `{Assignee}` and `{IssueCount}`.
+- `SendGrid.BodyTemplate`: Body template supporting `{Assignee}`, `{IssueCount}`, `{Filters}`.
+- `SendGrid.ContentType`: `text/plain` or `text/html` (HTML enables links).
+- `SendGrid.DryRun`: If `true`, emails send to the dry-run recipient.
+- `SendGrid.DryRunMaxEmails`: Max emails to send in dry-run mode (0 = no limit).
+- `SendGrid.FooterHtml`: Footer for HTML emails.
+- `SendGrid.FooterText`: Footer for plain-text emails.
+- `SendGrid.CcEmails`: Comma-separated CC list applied to all emails.
+
+Template placeholders:
+- `{Assignee}`, `{IssueCount}`, `{Filters}`
+
 ## Build
 ```bash
 dotnet build JiraDAtaHygiene.sln
@@ -26,7 +48,7 @@ dotnet run --project JiraDAtaHygiene.sln
 
 
 
-## Email Example
+## Example of Email that users receive
 Hello Jane Doe,
 
 Please review the following 6 issues that are in an incorrect state, grouped by Exception:
@@ -52,26 +74,6 @@ Missing Request Type. Update to reflect Product Roadmap, Engineering Enabler, or
 This is an automated email. For any questions please reach out to Tiago Andrade e Silva.
 This is part of data hygiene process. The goal is that your name does not show up in the Data Hygiene dashboard.
 
-## Configuration
-`appsettings.json` settings:
-- `Jira.BaseUrl`: Jira Cloud base URL, e.g. `https://your-domain.atlassian.net/`.
-- `Jira.Email`: Jira user email for API auth.
-- `Jira.ApiToken`: Jira API token.
-- `Jira.Filters`: List of filter entries with `Id` and `Description`.
-- `SendGrid.ApiKey`: SendGrid API key.
-- `SendGrid.FromEmail`: From address for outbound email.
-- `SendGrid.FromName`: From display name.
-- `SendGrid.SubjectTemplate`: Subject template supporting `{Assignee}` and `{IssueCount}`.
-- `SendGrid.BodyTemplate`: Body template supporting `{Assignee}`, `{IssueCount}`, `{Filters}`.
-- `SendGrid.ContentType`: `text/plain` or `text/html` (HTML enables links).
-- `SendGrid.DryRun`: If `true`, emails send to the dry-run recipient.
-- `SendGrid.DryRunMaxEmails`: Max emails to send in dry-run mode (0 = no limit).
-- `SendGrid.FooterHtml`: Footer for HTML emails.
-- `SendGrid.FooterText`: Footer for plain-text emails.
-- `SendGrid.CcEmails`: Comma-separated CC list applied to all emails.
-
-Template placeholders:
-- `{Assignee}`, `{IssueCount}`, `{Filters}`
 
 ## Code Structure
 - `Program.cs`: App entry point and orchestration (load settings, fetch Jira data, build emails, send).
