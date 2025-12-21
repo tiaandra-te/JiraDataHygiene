@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using JiraDataHygiene.Config;
@@ -20,6 +21,7 @@ internal static class Program
 
     private static async Task<int> Main()
     {
+        var stopwatch = Stopwatch.StartNew();
         var settingsPath = SettingsLoader.ResolveSettingsPath(SettingsFileName);
         if (settingsPath is null)
         {
@@ -65,7 +67,7 @@ internal static class Program
             issuesByFilter.Add(new FilterIssues(filterConfig.Id, filterName, filterConfig.Description, issues));
         }
 
-        var assignees = await BuildAssigneeBucketsAsync(
+        var (assignees, totalIssueCount, totalCommentCount) = await BuildAssigneeBucketsAsync(
             settings.Jira.BaseUrl,
             issuesByFilter,
             jiraService,
@@ -81,6 +83,8 @@ internal static class Program
 
         var dryRunSentCount = 0;
         var dryRunMax = settings.SendGrid.DryRunMaxEmails;
+        var sentEmailCount = 0;
+        var sentRecipients = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var bucket in assignees.Values)
         {
@@ -119,17 +123,33 @@ internal static class Program
                 dryRunSentCount++;
             }
 
+            if (sent)
+            {
+                sentEmailCount++;
+                sentRecipients.Add(toEmail);
+            }
+
             LogCollector.Info(sent
                 ? $"{(settings.SendGrid.DryRun ? "[DryRun] " : string.Empty)}Sent email to {toEmail} for {issueCount} issues."
                 : $"{(settings.SendGrid.DryRun ? "[DryRun] " : string.Empty)}Failed to send email to {toEmail} for {issueCount} issues.");
         }
 
-        await SendLogEmailAsync(sendGridService, settings.SendGrid);
+        stopwatch.Stop();
+        var summary = BuildRunSummary(
+            stopwatch.Elapsed,
+            settings.Jira.Filters.Count,
+            totalIssueCount,
+            sentEmailCount,
+            sentRecipients.Count,
+            totalCommentCount);
+        LogCollector.Info(summary);
+
+        await SendLogEmailAsync(sendGridService, settings.SendGrid, summary);
 
         return 0;
     }
 
-    private static async Task<Dictionary<string, AssigneeBucket>> BuildAssigneeBucketsAsync(
+    private static async Task<(Dictionary<string, AssigneeBucket> Assignees, int IssueCount, int CommentCount)> BuildAssigneeBucketsAsync(
         string baseUrl,
         IEnumerable<FilterIssues> filters,
         JiraService jiraService,
@@ -137,16 +157,19 @@ internal static class Program
         bool logComments)
     {
         var assignees = new Dictionary<string, AssigneeBucket>(StringComparer.OrdinalIgnoreCase);
+        var issueCount = 0;
+        var commentCount = 0;
 
         foreach (var filter in filters)
         {
             foreach (var issue in filter.Issues)
             {
-                    var assignee = issue.Fields.Assignee;
-                    if (assignee is null)
-                    {
-                        LogCollector.Info($"Skipping {issue.Key}: no assignee.");
-                        continue;
+                issueCount++;
+                var assignee = issue.Fields.Assignee;
+                if (assignee is null)
+                {
+                    LogCollector.Info($"Skipping {issue.Key}: no assignee.");
+                    continue;
                     }
 
                     if (string.IsNullOrWhiteSpace(assignee.EmailAddress))
@@ -168,7 +191,11 @@ internal static class Program
                             LogCollector.Info($"Commenting on {issue.Key}: {filter.Description}");
                         }
 
-                        await jiraService.AddCommentAsync(issue.Key, assignee.AccountId, filter.Description);
+                        var commented = await jiraService.AddCommentAsync(issue.Key, assignee.AccountId, filter.Description);
+                        if (commented)
+                        {
+                            commentCount++;
+                        }
                     }
                 }
 
@@ -192,10 +219,10 @@ internal static class Program
             }
         }
 
-        return assignees;
+        return (assignees, issueCount, commentCount);
     }
 
-    private static async Task SendLogEmailAsync(SendGridService sendGridService, SendGridSettings settings)
+    private static async Task SendLogEmailAsync(SendGridService sendGridService, SendGridSettings settings, string summary)
     {
         if (!settings.SendLogEmail || string.IsNullOrWhiteSpace(settings.LogEmail))
         {
@@ -212,5 +239,17 @@ internal static class Program
         var subject = "Jira Data Hygiene - Run Log";
 
         await sendGridService.SendLogAsync(settings, settings.LogEmail, subject, body);
+    }
+
+    private static string BuildRunSummary(
+        TimeSpan elapsed,
+        int filterCount,
+        int issueCount,
+        int sentEmailCount,
+        int recipientCount,
+        int commentCount)
+    {
+        return $"\n\nRun summary: Duration={elapsed:c}, FiltersLoaded={filterCount}, IssuesIdentified={issueCount}, " +
+               $"EmailsSent={sentEmailCount} to {recipientCount} recipients, CommentsCreated={commentCount}.\n\n";
     }
 }
