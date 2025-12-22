@@ -104,8 +104,8 @@ internal static class Program
                 appendFiltersWhenMissing: true,
                 includeFooter: true);
 
-            var toEmail = settings.SendGrid.DryRun ? "tiaandra@cisco.com" : bucket.Email;
-            var toName = settings.SendGrid.DryRun ? "Tiaandra Cisco" : (bucket.DisplayName ?? bucket.Email);
+            var toEmail = settings.SendGrid.DryRun ? settings.SendGrid.DryRunEmail : bucket.Email;
+            var toName = settings.SendGrid.DryRun ? settings.SendGrid.DryRunName : (bucket.DisplayName ?? bucket.Email);
 
             if (settings.SendGrid.DryRun && dryRunMax > 0 && dryRunSentCount >= dryRunMax)
             {

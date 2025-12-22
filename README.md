@@ -36,6 +36,8 @@ Console app that loads Jira issues from multiple filter IDs, aggregates them per
 - `SendGrid.CcEmails`: Comma-separated CC list applied to all emails.
 - `SendGrid.SendLogEmail`: If `true`, send a run log email at the end of execution.
 - `SendGrid.LogEmail`: Recipient for the run log email.
+- `SendGrid.DryRunEmail`: Email recipient used when `DryRun` is enabled.
+- `SendGrid.DryRunName`: Display name used when `DryRun` is enabled.
 
 Template placeholders:
 - `{Assignee}`, `{IssueCount}`, `{Filters}`

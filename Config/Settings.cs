@@ -31,6 +31,8 @@ public sealed class SendGridSettings
     public string CcEmails { get; set; } = string.Empty;
     public bool SendLogEmail { get; set; }
     public string LogEmail { get; set; } = string.Empty;
+    public string DryRunEmail { get; set; } = string.Empty;
+    public string DryRunName { get; set; } = string.Empty;
 }
 
 public sealed class JiraFilterConfig
