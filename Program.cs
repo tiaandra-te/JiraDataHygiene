@@ -74,7 +74,8 @@ internal static class Program
             issuesByFilter,
             jiraService,
             settings.Jira.EnableComments,
-            settings.Jira.LogComments);
+            settings.Jira.LogComments,
+            settings.SendGrid.DryRun);
 
         var useHtml = string.Equals(settings.SendGrid.ContentType, "text/html", StringComparison.OrdinalIgnoreCase);
         var templateBuilder = new EmailTemplateBuilder(
@@ -156,7 +157,8 @@ internal static class Program
         IEnumerable<FilterIssues> filters,
         JiraService jiraService,
         bool enableComments,
-        bool logComments)
+        bool logComments,
+        bool dryRun)
     {
         var assignees = new Dictionary<string, AssigneeBucket>(StringComparer.OrdinalIgnoreCase);
         var issueCount = 0;
@@ -190,13 +192,19 @@ internal static class Program
                     {
                         if (logComments)
                         {
-                            LogCollector.Info($"Commenting on {issue.Key}: {filter.Description}");
+                            var message = dryRun
+                                ? $"[DryRun] Would comment on {issue.Key}: {filter.Description}"
+                                : $"Commenting on {issue.Key}: {filter.Description}";
+                            LogCollector.Info(message);
                         }
 
-                        var commented = await jiraService.AddCommentAsync(issue.Key, assignee.AccountId, filter.Description);
-                        if (commented)
+                        if (!dryRun)
                         {
-                            commentCount++;
+                            var commented = await jiraService.AddCommentAsync(issue.Key, assignee.AccountId, filter.Description);
+                            if (commented)
+                            {
+                                commentCount++;
+                            }
                         }
                     }
                 }
@@ -240,7 +248,15 @@ internal static class Program
         var body = string.Join(Environment.NewLine, entries);
         var subject = "Jira Data Hygiene - Run Log";
 
-        await sendGridService.SendLogAsync(settings, settings.LogEmail, subject, body);
+        var sent = await sendGridService.SendLogAsync(settings, settings.LogEmail, subject, body);
+        if (sent)
+        {
+            LogCollector.Info($"Sent run log to {settings.LogEmail}.");
+        }
+        else
+        {
+            LogCollector.Error($"Failed to send run log to {settings.LogEmail}.");
+        }
     }
 
     private static string BuildRunSummary(
