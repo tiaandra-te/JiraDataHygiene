@@ -12,8 +12,8 @@ public sealed class JiraSettings
     public string Email { get; set; } = string.Empty;
     public string ApiToken { get; set; } = string.Empty;
     public List<JiraFilterConfig> Filters { get; set; } = [];
-    public bool EnableComments { get; set; }
-    public bool LogComments { get; set; }
+    public bool EnableJiraComments { get; set; }
+    public bool LogJiraCommentsToConsole { get; set; }
     public int CommentDupDaysSkip { get; set; } = 7;
 }
 
@@ -30,8 +30,8 @@ public sealed class SendGridSettings
     public string FooterHtml { get; set; } = string.Empty;
     public string FooterText { get; set; } = string.Empty;
     public string CcEmails { get; set; } = string.Empty;
-    public bool SendLogEmail { get; set; }
-    public string LogEmail { get; set; } = string.Empty;
+    public bool SendReportOfLogs { get; set; }
+    public string Email2SendReportOfLogs { get; set; } = string.Empty;
     public string DryRunEmail { get; set; } = string.Empty;
     public string DryRunName { get; set; } = string.Empty;
 }

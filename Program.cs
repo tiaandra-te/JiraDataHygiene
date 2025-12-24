@@ -73,8 +73,8 @@ internal static class Program
             settings.Jira.BaseUrl,
             issuesByFilter,
             jiraService,
-            settings.Jira.EnableComments,
-            settings.Jira.LogComments,
+            settings.Jira.EnableJiraComments,
+            settings.Jira.LogJiraCommentsToConsole,
             settings.Jira.CommentDupDaysSkip,
             settings.SendGrid.DryRun);
 
@@ -236,7 +236,7 @@ internal static class Program
 
     private static async Task SendLogEmailAsync(SendGridService sendGridService, SendGridSettings settings, string summary)
     {
-        if (!settings.SendLogEmail || string.IsNullOrWhiteSpace(settings.LogEmail))
+        if (!settings.SendReportOfLogs || string.IsNullOrWhiteSpace(settings.Email2SendReportOfLogs))
         {
             return;
         }
@@ -250,14 +250,14 @@ internal static class Program
         var body = string.Join(Environment.NewLine, entries);
         var subject = "Jira Data Hygiene - Run Log";
 
-        var sent = await sendGridService.SendLogAsync(settings, settings.LogEmail, subject, body);
+        var sent = await sendGridService.SendLogAsync(settings, settings.Email2SendReportOfLogs, subject, body);
         if (sent)
         {
-            LogCollector.Info($"Sent run log to {settings.LogEmail}.");
+            LogCollector.Info($"Sent run log to {settings.Email2SendReportOfLogs}.");
         }
         else
         {
-            LogCollector.Error($"Failed to send run log to {settings.LogEmail}.");
+            LogCollector.Error($"Failed to send run log to {settings.Email2SendReportOfLogs}.");
         }
     }
 
