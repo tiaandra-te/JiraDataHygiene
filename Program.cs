@@ -75,6 +75,7 @@ internal static class Program
             jiraService,
             settings.Jira.EnableComments,
             settings.Jira.LogComments,
+            settings.Jira.CommentDupDaysSkip,
             settings.SendGrid.DryRun);
 
         var useHtml = string.Equals(settings.SendGrid.ContentType, "text/html", StringComparison.OrdinalIgnoreCase);
@@ -158,6 +159,7 @@ internal static class Program
         JiraService jiraService,
         bool enableComments,
         bool logComments,
+        int commentDupDaysSkip,
         bool dryRun)
     {
         var assignees = new Dictionary<string, AssigneeBucket>(StringComparer.OrdinalIgnoreCase);
@@ -200,7 +202,7 @@ internal static class Program
 
                         if (!dryRun)
                         {
-                            var commented = await jiraService.AddCommentAsync(issue.Key, assignee.AccountId, filter.Description);
+                            var commented = await jiraService.AddCommentAsync(issue.Key, assignee.AccountId, filter.Description, commentDupDaysSkip);
                             if (commented)
                             {
                                 commentCount++;

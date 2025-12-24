@@ -8,6 +8,7 @@ namespace JiraDataHygiene.Services;
 
 public sealed class JiraService
 {
+    private const string CommentMarker = "#datahygiene";
     private readonly HttpClient _client;
     private readonly JsonSerializerOptions _jsonOptions;
 
@@ -87,8 +88,30 @@ public sealed class JiraService
         return string.IsNullOrWhiteSpace(filter?.Name) ? $"Filter {filterId}" : filter.Name;
     }
 
-    public async Task<bool> AddCommentAsync(string issueKey, string accountId, string message)
+    public async Task<bool> AddCommentAsync(string issueKey, string accountId, string message, int commentDupDaysSkip)
     {
+        var existingCreated = await FindLatestMatchingCommentCreatedAsync(issueKey, message);
+        if (existingCreated.HasValue)
+        {
+            var age = DateTimeOffset.UtcNow - existingCreated.Value;
+            if (commentDupDaysSkip > 0 && age.TotalDays < commentDupDaysSkip)
+            {
+                LogCollector.Info(
+                    $"\tComment already exists on {issueKey} from {existingCreated.Value:yyyy-MM-dd}; skipping.");
+                return true;
+            }
+
+            if (commentDupDaysSkip <= 0)
+            {
+                LogCollector.Info($"\tComment already exists on {issueKey}; skipping.");
+                return true;
+            }
+
+            LogCollector.Info(
+                $"\tComment already exists on {issueKey} from {existingCreated.Value:yyyy-MM-dd}; " +
+                $"creating duplicate because last comment is {Math.Floor(age.TotalDays)} days old.");
+        }
+
         var url = $"rest/api/3/issue/{issueKey}/comment";
         var payload = new
         {
@@ -111,7 +134,7 @@ public sealed class JiraService
                             new
                             {
                                 type = "text",
-                                text = $" {message} #datahygiene"
+                                text = $" {message} {CommentMarker}"
                             }
                         }
                     }
@@ -130,5 +153,111 @@ public sealed class JiraService
         var errorBody = await response.Content.ReadAsStringAsync();
         LogCollector.Error($"Failed to comment on {issueKey}: {response.StatusCode} {errorBody}");
         return false;
+    }
+
+    private async Task<DateTimeOffset?> FindLatestMatchingCommentCreatedAsync(string issueKey, string message)
+    {
+        var startAt = 0;
+        var maxResults = 50;
+        var expectedText = $"{message} {CommentMarker}";
+        DateTimeOffset? latestMatch = null;
+
+        while (true)
+        {
+            var url = $"rest/api/3/issue/{issueKey}/comment?startAt={startAt}&maxResults={maxResults}";
+            using var response = await _client.GetAsync(url);
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync();
+                LogCollector.Error($"Failed to load comments for {issueKey}: {response.StatusCode} {errorBody}");
+                return latestMatch;
+            }
+
+            var payload = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(payload);
+            if (!doc.RootElement.TryGetProperty("comments", out var comments) ||
+                comments.ValueKind != JsonValueKind.Array)
+            {
+                return latestMatch;
+            }
+
+            foreach (var comment in comments.EnumerateArray())
+            {
+                if (!comment.TryGetProperty("body", out var body))
+                {
+                    continue;
+                }
+
+                var text = ExtractCommentText(body);
+                if (!text.Contains(expectedText, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (!comment.TryGetProperty("created", out var createdElement) ||
+                    createdElement.ValueKind != JsonValueKind.String)
+                {
+                    latestMatch ??= DateTimeOffset.UtcNow;
+                    continue;
+                }
+
+                if (DateTimeOffset.TryParse(createdElement.GetString(), out var created))
+                {
+                    if (!latestMatch.HasValue || created > latestMatch.Value)
+                    {
+                        latestMatch = created;
+                    }
+                }
+            }
+
+            var total = doc.RootElement.TryGetProperty("total", out var totalElement)
+                ? totalElement.GetInt32()
+                : startAt + comments.GetArrayLength();
+
+            startAt += comments.GetArrayLength();
+            if (startAt >= total || comments.GetArrayLength() == 0)
+            {
+                break;
+            }
+        }
+
+        return latestMatch;
+    }
+
+    private static string ExtractCommentText(JsonElement body)
+    {
+        var builder = new System.Text.StringBuilder();
+        AppendText(body, builder);
+        return builder.ToString();
+    }
+
+    private static void AppendText(JsonElement element, System.Text.StringBuilder builder)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                if (element.TryGetProperty("text", out var textElement) &&
+                    textElement.ValueKind == JsonValueKind.String)
+                {
+                    builder.Append(textElement.GetString());
+                }
+
+                foreach (var property in element.EnumerateObject())
+                {
+                    if (property.NameEquals("text"))
+                    {
+                        continue;
+                    }
+
+                    AppendText(property.Value, builder);
+                }
+                break;
+            case JsonValueKind.Array:
+                foreach (var item in element.EnumerateArray())
+                {
+                    AppendText(item, builder);
+                }
+                break;
+        }
     }
 }

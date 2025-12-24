@@ -14,6 +14,7 @@ public sealed class JiraSettings
     public List<JiraFilterConfig> Filters { get; set; } = [];
     public bool EnableComments { get; set; }
     public bool LogComments { get; set; }
+    public int CommentDupDaysSkip { get; set; } = 7;
 }
 
 public sealed class SendGridSettings
